@@ -7,6 +7,7 @@
 import { mkdir, writeFile, copyFile, access, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MODELS_DIR = join(root, 'public', 'models');
@@ -51,11 +52,23 @@ async function copyOrtWasm() {
   // Wipe the dir first so stale flavors from older runs don't linger.
   await rm(ortDest, { recursive: true, force: true });
   await mkdir(ortDest, { recursive: true });
-  // Transformers.js bundles the onnxruntime-web assets in its dist folder.
+  // Locate the onnxruntime-web dist via Node module resolution rather than a
+  // hardcoded node_modules path. onnxruntime-web is a *transitive* dep of
+  // @huggingface/transformers, so under pnpm's default (non-hoisted) layout it
+  // lives in .pnpm/… and never at top-level node_modules — the old hardcoded
+  // path copied 0 files there, leaving the extension to 404 on the ort wasm.
+  const req = createRequire(import.meta.url);
   const candidates = [
-    join(root, 'node_modules', '@huggingface', 'transformers', 'dist'),
-    join(root, 'node_modules', 'onnxruntime-web', 'dist'),
+    join(dirname(req.resolve('@huggingface/transformers')), '..', 'dist'),
   ];
+  try {
+    // Resolve onnxruntime-web from transformers' context (it's transformers' dep).
+    const tfReq = createRequire(req.resolve('@huggingface/transformers'));
+    candidates.push(dirname(tfReq.resolve('onnxruntime-web')));
+  } catch {
+    // Fall back to the top-level path (hoisted/npm layouts).
+    candidates.push(join(root, 'node_modules', 'onnxruntime-web', 'dist'));
+  }
   let copied = 0;
   for (const name of ORT_FILES) {
     for (const dir of candidates) {
