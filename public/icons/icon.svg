@@ -1,0 +1,16 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Placeholder icon — replace with final artwork before the public launch. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF2D4B"/>
+      <stop offset="1" stop-color="#C8000F"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#g)"/>
+  <!-- play triangle -->
+  <path d="M52 44 L52 84 L86 64 Z" fill="#fff"/>
+  <!-- AI spark -->
+  <g fill="#fff" opacity="0.95">
+    <path d="M96 30 l3.2 7.6 7.6 3.2 -7.6 3.2 -3.2 7.6 -3.2 -7.6 -7.6 -3.2 7.6 -3.2 Z"/>
+  </g>
+</svg>

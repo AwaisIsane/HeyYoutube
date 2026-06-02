@@ -1,0 +1,9 @@
+# Build-script policy for dependencies (pnpm 11 reads it here, not package.json).
+# esbuild may build; the rest are intentionally skipped:
+#  - onnxruntime-node: native CUDA binary we never use (extension uses onnxruntime-web)
+#  - protobufjs / sharp: not needed for our browser-only, text-embedding path
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false

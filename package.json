@@ -1,0 +1,27 @@
+{
+  "name": "youtube-summarize-extension",
+  "version": "0.1.0",
+  "description": "Yt AI companion — on-device AI for YouTube videos (summarize, quiz, query) using Chrome's Gemini Nano.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "fetch-model": "node scripts/fetch-model.mjs",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.28",
+    "@playwright/test": "^1.60.0",
+    "@types/chrome": "^0.1.42",
+    "@types/dom-chromium-ai": "^0.0.16",
+    "@types/node": "^25.9.1",
+    "playwright": "^1.60.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14"
+  },
+  "packageManager": "pnpm@11.5.0+sha512.dbfcc4f81cf48597afd4bc391ffdf12c11f1a9fb83a395bfa6b0a2d9cc2fd8ffebafdb1ccbd529632153f793904c2615b7f09fe1a345473fd1c35845172a8eb1"
+}
