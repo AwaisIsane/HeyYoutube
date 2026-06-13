@@ -8,6 +8,7 @@ quiz yourself on, and ask questions about** — all from a side panel next to th
 It runs entirely **on-device** using **Gemini Nano**, the AI model built right into
 Chrome. No servers, no API keys, no sign-up — your data never leaves your browser.
 
+Try it out [Chrome Web Store](https://chromewebstore.google.com/detail/bgbccnbfogmdldpnibpllidlipleadkj?utm_source=item-share-cb)
 ## Demo
 
 [![Watch the demo](https://img.youtube.com/vi/Oeye29-mwzw/maxresdefault.jpg)](https://www.youtube.com/watch?v=Oeye29-mwzw)
