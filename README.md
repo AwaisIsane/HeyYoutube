@@ -1,6 +1,6 @@
 # Yt AI companion
 
-> 🧪 **Beta (v0.1.0)** — actively evolving. Expect rough edges.
+> 🧪 **Beta (v0.2.0)** — actively evolving. Expect rough edges.
 
 A Chrome extension that turns any YouTube video into something you can **summarize,
 quiz yourself on, and ask questions about** — all from a side panel next to the video.

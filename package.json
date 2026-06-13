@@ -1,6 +1,6 @@
 {
   "name": "youtube-summarize-extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Yt AI companion — on-device AI for YouTube videos (summarize, quiz, query) using Chrome's Gemini Nano.",
   "type": "module",
   "scripts": {
