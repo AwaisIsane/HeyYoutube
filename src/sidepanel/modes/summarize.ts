@@ -79,6 +79,7 @@ export async function runSummarize(
       signal,
       useSummarizer: ctx.summarizerAvailable(),
       lang: transcript.lang,
+      title: transcript.title,
       onProgress: (s) => {
         if (!live()) return;
         if (s.stage === 'finalizing') {

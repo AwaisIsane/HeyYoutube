@@ -23,20 +23,23 @@ export interface SummaryDeps {
   useSummarizer: boolean;
   /** Transcript language code, used to pick the summary output language. */
   lang?: string;
+  /** Video title, given as context so notes resolve "the speaker"/topic. */
+  title?: string;
   onProgress?: (p: SummaryProgress) => void;
   signal?: AbortSignal;
 }
 
-const MAP_SYSTEM =
-  'Summarize the key points of the given transcript section as concise markdown ' +
+const mapSystem = (title: string) =>
+  'Summarize the key points of the given section of a video transcript' +
+  `${title ? ` (the video is titled "${title}")` : ''} as concise markdown ` +
   'bullet points. Capture every distinct fact, claim, name, and topic. Do not ' +
   'add commentary.';
 
-const FINAL_SYSTEM =
-  'You are given bullet-point notes extracted from a video transcript. ' +
-  'Synthesize them into a clean, well-organized summary in markdown: a one-line ' +
-  'overview followed by grouped key points. Preserve all distinct information; ' +
-  'do not invent anything.';
+const finalSystem = (title: string) =>
+  'You are given bullet-point notes extracted from the transcript of a video' +
+  `${title ? ` titled "${title}"` : ''}. Synthesize them into a clean, ` +
+  'well-organized summary in markdown: a one-line overview followed by grouped ' +
+  'key points. Preserve all distinct information; do not invent anything.';
 
 /**
  * Repeatedly chunk `text` and re-summarize each chunk until the whole thing fits
@@ -76,21 +79,24 @@ export async function runSummary(
   segments: TranscriptSegment[],
   deps: SummaryDeps,
 ): Promise<string> {
-  // Map step: a fresh key-points session (Summarizer API when available, else a
-  // Prompter). One base session, cloned per chunk by Prompter.run.
-  const mapPrompter = new Prompter({ systemPrompt: MAP_SYSTEM, signal: deps.signal });
+  const title = deps.title?.trim().slice(0, 120) ?? '';
+
+  // Map step: a key-points session (Summarizer API when available, else a
+  // Prompter). The Summarizer is created once and reused across every chunk and
+  // reduce round — per-chunk create/destroy was the map stage's main overhead.
+  const mapPrompter = new Prompter({ systemPrompt: mapSystem(title), signal: deps.signal });
+  let summarizer: Summarizer | undefined;
   const summarizeUnit = async (text: string): Promise<string> => {
     if (deps.useSummarizer) {
-      const summarizer = await createSummarizer({
+      summarizer ??= await createSummarizer({
         type: 'key-points',
         length: 'long',
         outputLanguage: toOutputLanguage(deps.lang),
+        sharedContext: title
+          ? `Sections of the transcript of the video "${title}".`
+          : undefined,
       });
-      try {
-        return await summarizer.summarize(text);
-      } finally {
-        summarizer.destroy();
-      }
+      return summarizer.summarize(text);
     }
     mapPrompter.query = text;
     return mapPrompter.run({ signal: deps.signal });
@@ -120,7 +126,7 @@ export async function runSummary(
   };
 
   bp = new BigPrompt({
-    systemPrompt: FINAL_SYSTEM,
+    systemPrompt: finalSystem(title),
     signal: deps.signal,
     noOfChunks: 1,
     reduceChunks,
@@ -135,5 +141,6 @@ export async function runSummary(
   } finally {
     bp.destroy();
     mapPrompter.destroy();
+    summarizer?.destroy();
   }
 }

@@ -16,15 +16,20 @@ import { availableInput } from '@/lib/tokens';
 import { formatTimestamp } from '@/lib/youtube';
 import type { VectorStore, Passage } from '@/retrieval/vector-store';
 
-const ANSWER_SYSTEM =
-  'You answer questions about a YouTube video using ONLY the transcript ' +
-  'passages given with each question. Each passage starts with "[n]" and carries ' +
-  'inline "(m:ss)" timestamps marking when each sentence is spoken. Ground every ' +
-  'statement in those passages. When the user asks where or when something is ' +
-  'discussed, answer with the (m:ss) timestamp that immediately precedes the ' +
-  'relevant sentence. ' +
-  "If they do not contain the answer, reply exactly: \"The transcript doesn't " +
-  'cover that." Be concise and specific; do not pad or speculate.';
+// Best-effort grounding: Nano over-fires a strict "only if the passages contain
+// the answer" rule on broad or vague questions, so the refusal is reserved for
+// passages that are truly unrelated.
+const answerSystem = (title: string) =>
+  `You answer questions about the YouTube video ${title ? `"${title}"` : 'whose transcript is given'} ` +
+  'using the transcript passages provided with each question. Each passage ' +
+  'starts with "[n]" and carries inline "(m:ss)" timestamps marking when each ' +
+  'sentence is spoken. Base every statement on the passages. If the question is ' +
+  'broad or vague, give a short overview of what the passages discuss. If the ' +
+  'passages only partly answer the question, share what they do say. When the ' +
+  'user asks where or when something is discussed, answer with the (m:ss) ' +
+  'timestamp that immediately precedes the relevant sentence. Only when the ' +
+  'passages have nothing to do with the question, reply: "The transcript ' +
+  'doesn\'t cover that." Be concise; never invent facts not in the passages.';
 
 const REWRITE_SYSTEM =
   'You turn a user\'s latest message into one standalone search query for ' +
@@ -38,6 +43,10 @@ const ANSWER_TOP_K = 3;
 // Retrieval seeds (each widened to its neighbours and merged) and how many
 // recent exchanges to carry for follow-up continuity.
 const SEED_K = 4;
+// Short questions embed poorly and tend to be broad ("what is this about?"),
+// so they get wider retrieval and a title-anchored query.
+const SEED_K_BROAD = 6;
+const SHORT_QUESTION_WORDS = 5;
 const NEIGHBOR_RADIUS = 1;
 const HISTORY_TURNS = 2;
 const HISTORY_ANSWER_CHARS = 280;
@@ -67,11 +76,13 @@ export class QuerySession {
     private answerBase: LanguageModel,
     private rewriteBase: LanguageModel,
     private store: VectorStore,
+    private title: string,
   ) {}
 
-  static async create(store: VectorStore): Promise<QuerySession> {
+  static async create(store: VectorStore, title?: string): Promise<QuerySession> {
+    const cleanTitle = title?.trim().slice(0, 120) ?? '';
     const answerBase = await createSession({
-      systemPrompt: ANSWER_SYSTEM,
+      systemPrompt: answerSystem(cleanTitle),
       temperature: ANSWER_TEMPERATURE,
       topK: ANSWER_TOP_K,
     });
@@ -80,7 +91,7 @@ export class QuerySession {
       temperature: ANSWER_TEMPERATURE,
       topK: ANSWER_TOP_K,
     });
-    return new QuerySession(answerBase, rewriteBase, store);
+    return new QuerySession(answerBase, rewriteBase, store, cleanTitle);
   }
 
   /** A compact transcript of the last few exchanges for follow-up continuity. */
@@ -104,6 +115,7 @@ export class QuerySession {
     const clone = await this.rewriteBase.clone();
     try {
       const prompt =
+        (this.title ? `VIDEO TITLE: ${this.title}\n` : '') +
         `CONVERSATION:\n${this.recentHistory()}\n\n` +
         `LATEST MESSAGE: ${question}\n\nSearch query:`;
       const out = (await clone.prompt(prompt, { signal })).trim();
@@ -140,6 +152,8 @@ export class QuerySession {
 
   /**
    * Assemble the answer prompt, trimming passages to fit the input budget.
+   * Candidates are considered best-score first so a budget cut drops the
+   * weakest passages, but the prompt itself stays in transcript order.
    * Returns the prompt plus the passages that actually made it in, so the caller
    * can report which timestamps the answer is grounded in.
    */
@@ -153,23 +167,61 @@ export class QuerySession {
       : '';
     const tail = `\n\nQUESTION: ${question}\nANSWER:`;
     const budget = availableInput(session);
+    const assemble = (kept: Passage[]) => {
+      const body = kept.map((t, i) => QuerySession.label(t, i)).join('\n\n');
+      return `${head}TRANSCRIPT PASSAGES:\n${body}${tail}`;
+    };
 
-    const kept: Passage[] = [];
-    for (const p of passages) {
-      const body = [...kept, p].map((t, i) => QuerySession.label(t, i)).join('\n\n');
-      const prompt = `${head}TRANSCRIPT PASSAGES:\n${body}${tail}`;
-      const promptEstimateContextUsage =await session.measureInputUsage(prompt);
-      if (promptEstimateContextUsage > budget && kept.length > 0) break;
-      kept.push(p);
+    const ranked = [...passages].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    let kept: Passage[] = [];
+    for (const p of ranked) {
+      const trial = [...kept, p].sort(
+        (a, b) => passages.indexOf(a) - passages.indexOf(b),
+      );
+      if ((await session.measureInputUsage(assemble(trial))) > budget) {
+        if (kept.length > 0) break;
+        continue; // too big even alone; a smaller passage may still fit
+      }
+      kept = trial;
     }
 
-    const body = kept.map((t, i) => QuerySession.label(t, i)).join('\n\n');
-    return { prompt: `${head}TRANSCRIPT PASSAGES:\n${body}${tail}`, kept };
+    // Nothing fit whole: trim the best passage to the budget rather than
+    // sending an empty passage list, which guarantees a refusal.
+    if (kept.length === 0 && ranked.length > 0) {
+      const first = ranked[0]!;
+      let fitted = first;
+      let used = await session.measureInputUsage(assemble([fitted]));
+      while (fitted.text.length > 1 && used > budget) {
+        const keep = Math.max(
+          1,
+          Math.floor(fitted.text.length * (budget / used)) - 1,
+        );
+        const text = fitted.text.slice(0, keep);
+        fitted = {
+          ...first,
+          text,
+          times: first.times?.filter((t) => t.offset < text.length),
+        };
+        used = await session.measureInputUsage(assemble([fitted]));
+      }
+      kept = [fitted];
+    }
+
+    return { prompt: assemble(kept), kept };
   }
 
   async ask(question: string, opts: AskOptions = {}): Promise<AskResult> {
-    const query = await this.rewriteQuery(question, opts.signal);
-    const passages = await this.store.searchMerged(query, SEED_K, NEIGHBOR_RADIUS);
+    // Short questions are usually broad; anchor them to the video's topic via
+    // the title (a deterministic, zero-latency expansion) and retrieve wider.
+    const broad =
+      question.trim().split(/\s+/).filter(Boolean).length <= SHORT_QUESTION_WORDS;
+    let query = await this.rewriteQuery(question, opts.signal);
+    if (broad && this.title) query = `${this.title}. ${query}`;
+    const passages = await this.store.searchMerged(
+      query,
+      broad ? SEED_K_BROAD : SEED_K,
+      NEIGHBOR_RADIUS,
+    );
 
     // A fresh clone per turn: starts from just the system prompt, so context
     // never accumulates across questions.

@@ -138,7 +138,10 @@ async function ensureQuerySession(
     }
     // Download progress is already handled by ensureModelReady above, which owns
     // the single shared download banner; the model is ready by the time we're here.
-    view.query.session = await QuerySession.create(view.query.vectorStore);
+    view.query.session = await QuerySession.create(
+      view.query.vectorStore,
+      transcript.title,
+    );
     thinking.parentElement?.remove();
     return view.query.session;
   } catch (err) {

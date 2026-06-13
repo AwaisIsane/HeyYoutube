@@ -976,6 +976,24 @@ button.primary .spark {
   flex-direction: column;
   gap: 16px;
 }
+/* "more questions coming" hint shown while the quiz is still streaming in */
+.quiz-gen {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 2px 2px 4px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.quiz-gen .spark {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  background: var(--accent);
+  clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%);
+  animation: sparkPulse 1.1s ease-in-out infinite;
+}
 .quiz-q {
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -1110,6 +1128,13 @@ button.primary .spark {
 .quiz-explain b {
   color: var(--good);
   font-weight: 800;
+}
+.quiz-explain.wrong {
+  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.quiz-explain.wrong b {
+  color: var(--accent);
 }
 .quiz-score {
   flex: none;

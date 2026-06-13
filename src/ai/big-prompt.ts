@@ -22,6 +22,14 @@ export interface RunChunksOpts extends RunOpts {
   chunkTokens?: number;
   /** Called as each reduced chunk is run (done index, total). */
   onProgress?: (done: number, total: number) => void;
+  /** Skip a chunk whose run fails instead of aborting the whole batch — for
+   *  callers where one bad chunk should cost one output, not the run (quiz).
+   *  Aborts via `signal` still propagate. */
+  skipFailedChunks?: boolean;
+  /** Called with each chunk's raw output the moment it finishes, so callers can
+   *  render incrementally instead of waiting for the whole batch. Awaited, so
+   *  chunks stay strictly ordered. */
+  onChunk?: (result: { output: string; startMs?: number }) => void | Promise<void>;
 }
 
 export class BigPrompt extends Prompter {
@@ -60,17 +68,25 @@ export class BigPrompt extends Prompter {
         signal: opts.signal,
       });
       p.query = chunk.text;
+      let output: string;
       try {
-        const output = await p.run({
+        output = await p.run({
           responseConstraint: opts.responseConstraint,
           signal: opts.signal,
         });
-        // Carry the source chunk's start time so callers can link a result back
-        // to where in the video it came from (quiz "jump to").
-        outputs.push({ output, startMs: chunk.startMs });
+      } catch (err) {
+        if (!opts.skipFailedChunks || opts.signal?.aborted) throw err;
+        continue;
       } finally {
         p.destroy();
       }
+      // Carry the source chunk's start time so callers can link a result back
+      // to where in the video it came from (quiz "jump to").
+      const result = { output, startMs: chunk.startMs };
+      outputs.push(result);
+      // Hand the result off only when a listener is registered. The session is
+      // already destroyed above, so rendering never holds an idle session open.
+      if (opts.onChunk) await opts.onChunk(result);
     }
     return outputs;
   }

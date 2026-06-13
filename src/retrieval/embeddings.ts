@@ -12,6 +12,7 @@ import {
   env,
   type FeatureExtractionPipeline,
 } from '@huggingface/transformers';
+import { retrievalChunks } from '@/ai/chunking';
 
 const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
 
@@ -73,11 +74,27 @@ async function getPipeline(): Promise<FeatureExtractionPipeline> {
   return pipePromise;
 }
 
+// The ONNX session behind the pipeline supports only ONE in-flight run: the
+// asyncify wasm build suspends/resumes a single wasm stack, so a second run()
+// started while one is suspended corrupts it and neither promise ever settles
+// (every later embedding call then hangs too, until the page reloads). Chain
+// all inference through this queue so concurrent callers (e.g. Promise.all in
+// the quiz flow, or quiz and query running together) serialize instead.
+let inferenceChain: Promise<unknown> = Promise.resolve();
+
+function enqueueInference<T>(task: () => Promise<T>): Promise<T> {
+  const run = inferenceChain.then(task, task);
+  inferenceChain = run.catch(() => {});
+  return run;
+}
+
 /** Embed a batch of texts into L2-normalized 384-dim vectors (mean-pooled). */
 export async function embed(texts: string[]): Promise<Float32Array[]> {
   if (texts.length === 0) return [];
   const pipe = await getPipeline();
-  const out = await pipe(texts, { pooling: 'mean', normalize: true });
+  const out = await enqueueInference(() =>
+    pipe(texts, { pooling: 'mean', normalize: true }),
+  );
   const [rows, dim] = out.dims as [number, number];
   const data = out.data as Float32Array;
   const vectors: Float32Array[] = [];
@@ -90,6 +107,26 @@ export async function embed(texts: string[]): Promise<Float32Array[]> {
 export async function embedOne(text: string): Promise<Float32Array> {
   const [vec] = await embed([text]);
   return vec!;
+}
+
+/**
+ * Embed text of any length as the L2-normalized mean of its retrieval-sized
+ * subchunk vectors. MiniLM truncates input at 256 wordpiece tokens, so embedding
+ * a long text directly silently drops everything past the cap; averaging
+ * subchunk vectors keeps the whole text in the signal.
+ */
+export async function embedLong(text: string): Promise<Float32Array> {
+  const chunks = await retrievalChunks(text, countTokens);
+  if (chunks.length <= 1) return embedOne(chunks[0]?.text ?? text);
+  const vectors = await embed(chunks.map((c) => c.text));
+  const dim = vectors[0]!.length;
+  const mean = new Float32Array(dim);
+  for (const v of vectors) for (let i = 0; i < dim; i++) mean[i]! += v[i]!;
+  let norm = 0;
+  for (let i = 0; i < dim; i++) norm += mean[i]! * mean[i]!;
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < dim; i++) mean[i]! /= norm;
+  return mean;
 }
 
 /**
